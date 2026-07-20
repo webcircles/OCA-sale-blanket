@@ -82,6 +82,45 @@ class TestSaleCallOffOrder(SaleOrderBlanketOrderCase):
         self.assertIn(order.state, ["sale", "done"])
 
     @freezegun.freeze_time("2025-02-01")
+    def test_confirm_ok_with_section_line_on_blanket(self):
+        """A section/note line on the blanket order has no product_uom and
+        must not break the call-off/blanket line matching once the call-off
+        order actually calls off a product from the blanket order."""
+        self.blanket_so.write(
+            {
+                "order_line": [
+                    Command.create(
+                        {
+                            "display_type": "line_section",
+                            "name": "A section",
+                        }
+                    )
+                ]
+            }
+        )
+        self.blanket_so.action_confirm()
+        order = self.env["sale.order"].create(
+            {
+                "order_type": "call_off",
+                "date_order": "2025-02-01",
+                "partner_id": self.partner.id,
+                "blanket_order_id": self.blanket_so.id,
+                "order_line": [
+                    Command.create(
+                        {
+                            "product_id": self.product_1.id,
+                            "name": self.product_1.name,
+                            "product_uom_qty": 2.0,
+                            "price_unit": 0.0,
+                        }
+                    )
+                ],
+            }
+        )
+        order.action_confirm()
+        self.assertIn(order.state, ["sale", "done"])
+
+    @freezegun.freeze_time("2025-02-01")
     def test_order_line_constrains(self):
         self.blanket_so.action_confirm()
 

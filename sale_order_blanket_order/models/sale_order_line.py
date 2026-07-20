@@ -416,6 +416,8 @@ class SaleOrderLine(models.Model):
             ] |= line
 
         for line in blanket_lines:
+            if line.display_type or line.state == "cancel" or not line.product_uom:
+                continue
             if (
                 float_compare(
                     line.call_off_remaining_qty,
