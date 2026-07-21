@@ -127,6 +127,39 @@ class SaleOrder(models.Model):
         "blanket order.",
         states=READONLY_FIELD_STATES,
     )
+    invoice_on_call_off = fields.Boolean(
+        string="Invoice on Call-off Orders",
+        states=READONLY_FIELD_STATES,
+        help="If checked, call-off orders linked to this blanket order are priced "
+        "and invoiced independently, exactly like regular sales orders (this "
+        "supports fixed-price as well as delivered-quantity/timesheet invoicing "
+        "policies). The blanket order itself becomes a non-invoiceable reference "
+        "document: its own lines cannot be invoiced. Use this for service/"
+        "consulting framework agreements where each call-off is billed on its own. "
+        "Leave unchecked for the classic stock/procurement blanket order behavior, "
+        "where invoicing always happens on the blanket order and call-off order "
+        "lines must be priced at 0.0.",
+    )
+    amount_total_kpi = fields.Monetary(
+        string="Total (list/kanban)",
+        compute="_compute_amount_total_kpi",
+        currency_field="currency_id",
+        help="Same as the order Total, except forced to 0 for blanket orders "
+        "with invoice_on_call_off enabled. Used in list/kanban views instead "
+        "of the regular Total, so the blanket order's reference value is not "
+        "visually added to the real, invoiced value of its linked call-off "
+        "orders (the actual amount_total field is left untouched everywhere "
+        "else: quotation/contract report, portal, down payment, credit "
+        "limit...).",
+    )
+
+    @api.depends("amount_total", "order_type", "invoice_on_call_off")
+    def _compute_amount_total_kpi(self):
+        for order in self:
+            if order.order_type == "blanket" and order.invoice_on_call_off:
+                order.amount_total_kpi = 0.0
+            else:
+                order.amount_total_kpi = order.amount_total
 
     show_deliver_remaining = fields.Boolean(
         compute="_compute_show_deliver_remaining",

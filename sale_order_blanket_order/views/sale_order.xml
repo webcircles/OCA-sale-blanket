@@ -88,6 +88,11 @@
                     name="blanket_strict_packaging"
                     attrs="{'invisible': [('order_type', '!=', 'blanket')]}"
                 />
+                <field
+                    name="invoice_on_call_off"
+                    widget="boolean_toggle"
+                    attrs="{'invisible': [('order_type', '!=', 'blanket')]}"
+                />
             </field>
             <field name="manual_delivery" position="after">
                 <field
@@ -203,6 +208,16 @@
             <field name="name" position="before">
                 <field name="order_type" />
             </field>
+            <field name="amount_total" position="replace">
+                <field
+                    name="amount_total_kpi"
+                    string="Total"
+                    sum="Total Tax Included"
+                    widget="monetary"
+                    decoration-bf="1"
+                    optional="show"
+                />
+            </field>
         </field>
     </record>
 
@@ -213,6 +228,16 @@
             <field name="name" position="before">
                 <field name="order_type" />
             </field>
+            <field name="amount_total" position="replace">
+                <field
+                    name="amount_total_kpi"
+                    string="Total"
+                    sum="Total Tax Included"
+                    widget="monetary"
+                    decoration-bf="1"
+                    optional="show"
+                />
+            </field>
         </field>
     </record>
 
@@ -221,10 +246,33 @@
         <field name="inherit_id" ref="sale.view_order_tree" />
         <field name="mode">primary</field>
         <field name="arch" type="xml">
+            <!-- mode="primary" starts from the arch already merged with the
+                 other (non-primary) extensions of sale.view_order_tree,
+                 including sale_order_tree_view above, which already
+                 replaced amount_total with amount_total_kpi. -->
             <field name="date_order" position="after">
                 <field name="blanket_validity_start_date" optional="show" />
                 <field name="blanket_validity_end_date" optional="show" />
             </field>
+        </field>
+    </record>
+
+    <record model="ir.ui.view" id="sale_order_kanban_view">
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_sale_order_kanban" />
+        <field name="arch" type="xml">
+            <!-- Target the displayed "amount_total" specifically (identified
+                 by widget="monetary"), not the plain field declaration used
+                 elsewhere in the kanban arch, and not indexed by position:
+                 other addons installed on top of this kanban view may add or
+                 remove "amount_total" occurrences, which would break a
+                 position-based xpath ([2]). -->
+            <xpath
+                expr="//field[@name='amount_total'][@widget='monetary']"
+                position="replace"
+            >
+                <field name="amount_total_kpi" widget="monetary" />
+            </xpath>
         </field>
     </record>
 

@@ -131,8 +131,12 @@ class SaleOrderLine(models.Model):
     def _check_call_off_order_line_price(self):
         price_precision = self.env["decimal.precision"].precision_get("Product Price")
         for line in self:
-            if line.order_type == "call_off" and not float_is_zero(
-                line.price_unit, precision_digits=price_precision
+            if (
+                line.order_type == "call_off"
+                and not line.blanket_order_id.invoice_on_call_off
+                and not float_is_zero(
+                    line.price_unit, precision_digits=price_precision
+                )
             ):
                 raise ValidationError(
                     _(
@@ -471,7 +475,7 @@ class SaleOrderLine(models.Model):
         return values
 
     def _get_display_price(self):
-        if self.order_type == "call_off":
+        if self.order_type == "call_off" and not self.blanket_order_id.invoice_on_call_off:
             return 0.0
         return super()._get_display_price()
 
@@ -482,12 +486,18 @@ class SaleOrderLine(models.Model):
         return res
 
     def _compute_tax_id(self):
-        # Overload to consider the call-off order lines in the computation
-        # For these lines we don't want to apply taxes. If we don't enforce
-        # the tax_id to False, we could end up with an amount to invoice
-        # if a fixed price is set on linked taxes. All the invoicing is done
-        # on the blanket order line including the taxes.
-        call_off_lines = self.filtered(lambda line: line.order_type == "call_off")
+        # Overload to consider the call-off order lines in the computation.
+        # By default, we don't want to apply taxes on call-off lines: if we
+        # don't enforce the tax_id to False, we could end up with an amount
+        # to invoice if a fixed price is set on linked taxes, since all the
+        # invoicing is done on the blanket order line including the taxes.
+        # When the blanket order has invoice_on_call_off enabled, call-off
+        # lines are invoiced on their own, exactly like a regular sale order
+        # line, so taxes must be computed normally.
+        call_off_lines = self.filtered(
+            lambda line: line.order_type == "call_off"
+            and not line.blanket_order_id.invoice_on_call_off
+        )
         other_lines = self - call_off_lines
         call_off_lines.tax_id = False
         return super(SaleOrderLine, other_lines)._compute_tax_id()
@@ -530,25 +540,49 @@ class SaleOrderLine(models.Model):
                 line.qty_to_deliver = line.product_uom_qty
         return res
 
+    @api.depends("order_type", "blanket_order_id.invoice_on_call_off")
     def _compute_qty_delivered(self):
-        # Overload to consider the call-off order lines in the computation
-        # For these lines the qty delivered is always 0 as the delivery is
-        # done on the blanket order line.
-        call_off_lines = self.filtered(lambda line: line.order_type == "call_off")
+        # Overload to consider the call-off order lines in the computation.
+        # By default the qty delivered on a call-off line is always 0, since
+        # the delivery is tracked on the blanket order line. When the blanket
+        # order has invoice_on_call_off enabled, the call-off line is invoiced
+        # on its own, so its delivered quantity must be computed normally
+        # (e.g. from timesheets, for a delivered-quantity service policy).
+        call_off_lines = self.filtered(
+            lambda line: line.order_type == "call_off"
+            and not line.blanket_order_id.invoice_on_call_off
+        )
         other_lines = self - call_off_lines
         res = super(SaleOrderLine, other_lines)._compute_qty_delivered()
         for line in call_off_lines:
             line.qty_delivered = 0
         return res
 
+    @api.depends(
+        "order_type",
+        "blanket_order_id.invoice_on_call_off",
+        "order_id.invoice_on_call_off",
+    )
     def _compute_qty_to_invoice(self):
-        # Overload to consider the call-off order lines in the computation
-        # For these lines the qty to invoice is always 0 as the invoicing is
-        # done on the blanket order line.
-        call_off_lines = self.filtered(lambda line: line.order_type == "call_off")
-        other_lines = self - call_off_lines
+        # Overload to consider the call-off order lines in the computation.
+        # By default the qty to invoice on a call-off line is always 0, since
+        # invoicing is done on the blanket order line. When the blanket order
+        # has invoice_on_call_off enabled, it's the other way around: the
+        # call-off line is invoiced normally (fixed price or delivered
+        # quantity, exactly like a regular sale order line), and the blanket
+        # order line itself becomes a non-invoiceable reference: its qty to
+        # invoice is forced to 0 instead.
+        call_off_lines_to_zero = self.filtered(
+            lambda line: line.order_type == "call_off"
+            and not line.blanket_order_id.invoice_on_call_off
+        )
+        blanket_lines_to_zero = self.filtered(
+            lambda line: line.order_type == "blanket" and line.order_id.invoice_on_call_off
+        )
+        lines_to_zero = call_off_lines_to_zero | blanket_lines_to_zero
+        other_lines = self - lines_to_zero
         res = super(SaleOrderLine, other_lines)._compute_qty_to_invoice()
-        for line in call_off_lines:
+        for line in lines_to_zero:
             line.qty_to_invoice = 0
         return res
 
